@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGameState } from './hooks/useGameState';
-import { PlayerCard } from './components/PlayerCard';
+import { TableLayout } from './components/TableLayout';
 import { executeAction, startInteraction, cancelInteraction } from './api';
 
 function App() {
@@ -18,7 +18,7 @@ function App() {
     }
   }, []);
 
-  const { gameState, error, loading, refresh } = useGameState(gameId);
+  const { gameState, error, loading, refresh, isDebug } = useGameState(gameId);
 
   const [actionPopup, setActionPopup] = useState<{
     type: 'shoot' | 'item';
@@ -108,7 +108,7 @@ function App() {
     }
   };
 
-  if (!gameId) {
+  if (!gameId && !isDebug) {
     return (
       <div className="container" style={{ marginTop: '100px' }}>
         <h1>Buckshot Roulette Tablet</h1>
@@ -130,39 +130,6 @@ function App() {
 
   return (
     <div className="container">
-      <div className="game-header">
-        <h1 className="game-title">ROUND {gameState.round}</h1>
-        <div className="game-info">
-          <span>
-            Current Turn: <strong>PLAYER {gameState.players[gameState.current_player_index]?.id} ({gameState.players[gameState.current_player_index]?.name || `Player ${gameState.players[gameState.current_player_index]?.id}`})</strong>
-          </span>
-        </div>
-      </div>
-
-      {/* Shotgun Status */}
-      <div className="shotgun-status">
-        <div className="shell-count live">
-          <span>LIVE</span>
-          <strong>{gameState.shotgun.live_shells}</strong>
-        </div>
-        <div className="shell-count blank">
-          <span>BLANK</span>
-          <strong>{gameState.shotgun.blank_shells}</strong>
-        </div>
-        {gameState.shotgun.is_sawed_off && <div className="sawed-off-badge">SAWED OFF</div>}
-      </div>
-
-      {/* Broadcast Message Overlay */}
-      {visibleMessage && (
-        <div className="broadcast-message-container">
-          <div className="broadcast-message">
-            <div className="broadcast-label">INCOMING MESSAGE</div>
-            <div className="broadcast-content">{visibleMessage.content}</div>
-            <button className="close-msg-btn" onClick={() => setVisibleMessage(null)}>CLOSE</button>
-          </div>
-        </div>
-      )}
-
       {gameState.pending_interaction && (
         <div className="target-selection-overlay">
           <h2 style={{ color: '#f1c40f' }}>SELECT TARGET FOR {gameState.pending_interaction.item.toUpperCase()}</h2>
@@ -175,40 +142,16 @@ function App() {
         </div>
       )}
 
-      <div className="players-grid">
-        {gameState.players.map((player) => {
-          const isTargetable = !!gameState.pending_interaction && player.id !== gameState.pending_interaction.source;
-          const isCurrentTurn = gameState.players[gameState.current_player_index]?.id === player.id;
+      {/* Main Table Layout */}
+      <TableLayout
+        gameState={gameState}
+        onAction={handleAction}
+        onSelectTarget={handleTargetSelect}
+        message={visibleMessage}
+        actionPopup={actionPopup}
+      />
 
-          return (
-            <PlayerCard
-              key={player.id}
-              player={player}
-              isCurrentTurn={isCurrentTurn}
-              onAction={handleAction}
-              isTargetable={isTargetable}
-              onSelectTarget={() => handleTargetSelect(player.id)}
-            />
-          );
-        })}
-      </div>
-
-      {/* Action Popup */}
-      {actionPopup && (
-        <div className="action-popup-container">
-          <div className={`action-popup ${actionPopup.type === 'item' ? 'item-use' : ''}`}>
-            <div className="action-source">{actionPopup.source}</div>
-            <div className="action-main">
-              {actionPopup.type === 'shoot' ? (
-                <>SHOOTS {actionPopup.target}</>
-              ) : (
-                <>USES {actionPopup.item}</>
-              )}
-            </div>
-            <div className="action-result">{actionPopup.result}</div>
-          </div>
-        </div>
-      )}
+      {/* Overlays (Keep them for now, will refactor later) */}
 
       {/* Game Over Overlay */}
       {gameState.is_game_over && (

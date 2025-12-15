@@ -16,12 +16,12 @@ body {
   /* Prevent scrolling on tablet */
 }
 
-.container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  padding: 10px;
-  box-sizing: border-box;
+/* Reset global resets handled by TableLayout */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #000;
+  overflow: hidden;
 }
 
 .game-header {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getGameState, type GameState } from '../api';
+import { MOCK_GAME_STATE } from '../mockData';
 
 export const useGameState = (gameId: string | null) => {
     const [gameState, setGameState] = useState<GameState | null>(null);
@@ -7,7 +8,16 @@ export const useGameState = (gameId: string | null) => {
     const [loading, setLoading] = useState<boolean>(true);
     const intervalRef = useRef<number | null>(null);
 
+    // Check for debug mode via URL param or env var
+    const isDebug = new URLSearchParams(window.location.search).get('debug') === 'true';
+
     const fetchState = async () => {
+        if (isDebug) {
+            setGameState(MOCK_GAME_STATE);
+            setLoading(false);
+            return;
+        }
+
         if (!gameId) return;
         try {
             const data = await getGameState(gameId);
@@ -15,8 +25,6 @@ export const useGameState = (gameId: string | null) => {
             setError(null);
         } catch (err) {
             console.error("Failed to fetch game state:", err);
-            // Don't set error on every poll failure to avoid flickering, just log it
-            // But if it's the first load, we should show error
             if (loading) {
                 setError("Failed to connect to game server.");
             }
@@ -26,9 +34,11 @@ export const useGameState = (gameId: string | null) => {
     };
 
     useEffect(() => {
-        if (gameId) {
+        if (isDebug || gameId) {
             fetchState(); // Initial fetch
-            intervalRef.current = window.setInterval(fetchState, 1000); // Poll every 1s
+            if (!isDebug) {
+                intervalRef.current = window.setInterval(fetchState, 1000); // Poll every 1s
+            }
         }
 
         return () => {
@@ -36,7 +46,7 @@ export const useGameState = (gameId: string | null) => {
                 clearInterval(intervalRef.current);
             }
         };
-    }, [gameId]);
+    }, [gameId, isDebug]);
 
-    return { gameState, error, loading, refresh: fetchState };
+    return { gameState, error, loading, refresh: fetchState, isDebug };
 };
