@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useGameState } from './hooks/useGameState';
 import { TableLayout } from './components/TableLayout';
+import { DebugPanel } from './components/DebugPanel';
 import { executeAction, startInteraction, cancelInteraction } from './api';
 
 function App() {
@@ -18,7 +19,18 @@ function App() {
     }
   }, []);
 
-  const { gameState, error, loading, refresh, isDebug } = useGameState(gameId);
+  const { 
+    gameState, 
+    error, 
+    loading, 
+    refresh, 
+    isDebug, 
+    serialConnected, 
+    connectSerial, 
+    disconnectSerial,
+    useItem,
+    shootShotgun,
+  } = useGameState(gameId);
 
   const [actionPopup, setActionPopup] = useState<{
     type: 'shoot' | 'item';
@@ -166,6 +178,18 @@ function App() {
             <div className="winner-id">PLAYER {gameState.winner?.id}</div>
           </div>
         </div>
+      )}
+
+      {/* Debug Panel - Always available when isDebug is true */}
+      {isDebug && gameState && (
+        <DebugPanel
+          gameState={gameState}
+          serialConnected={serialConnected}
+          onConnectSerial={connectSerial}
+          onDisconnectSerial={disconnectSerial}
+          onUseItem={useItem}
+          onShootShotgun={shootShotgun}
+        />
       )}
     </div>
   );

@@ -56,7 +56,7 @@ Base URL: `http://localhost:8000`
 - **Body**:
   ```json
   {
-    "action": "shoot" | "use_item",
+    "action": "shoot" | "use",
     "target_id": "int", // Optional
     "item_name": "string" // Optional
   }
