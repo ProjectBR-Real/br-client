@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   getGameState,
   type GameState,
-  useItem,
+  type SerialPort,
+  useItem as apiUseItem,
   shootShotgun,
   connectSerialDevice,
   readSerialData,
@@ -10,7 +11,10 @@ import {
 } from "../api";
 import { MOCK_GAME_STATE } from "../mockData";
 
-export const useGameState = (gameId: string | null) => {
+export const useGameState = (
+  gameId: string | null,
+  onSerialEvent?: (event: string) => void,
+) => {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -18,14 +22,13 @@ export const useGameState = (gameId: string | null) => {
 
   // Serial communication state
   const [serialConnected, setSerialConnected] = useState<boolean>(false);
-  const serialPortRef = useRef<any>(null);
-  const serialReaderRef = useRef<any>(null);
+  const serialPortRef = useRef<SerialPort | null>(null);
 
   // Check for debug mode via URL param or env var
   const isDebug =
     new URLSearchParams(window.location.search).get("debug") === "true";
 
-  const fetchState = async () => {
+  const fetchState = useCallback(async () => {
     // デバッグモードでもgameIdがあればAPIから取得する
     // gameIdがない場合のみモックデータを使用
     if (!gameId) {
@@ -49,81 +52,120 @@ export const useGameState = (gameId: string | null) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [gameId, isDebug, loading]);
 
   // Initialize serial communication if Web Serial API is available
   useEffect(() => {
     if (!gameId || isDebug) return;
 
+    let isMounted = true;
+
+    const handleSerialDataLocal = async (data: string, gId: string) => {
+      const line = data.trim();
+
+      if (!line) return; // Ignore empty lines
+
+      // Parse item detection (e.g., "ITEM:CIG")
+      if (line.startsWith("ITEM:")) {
+        const itemType = line.substring(5).toLowerCase();
+        console.log("Item detected via serial:", itemType);
+
+        // Notify via callback
+        onSerialEvent?.(
+          `[SERIAL] Item detected: ITEM:${itemType.toUpperCase()}`,
+        );
+
+        // Map serial format to internal format
+        const itemNameMap: Record<string, string> = {
+          cig: "cigarette",
+          beer: "beer",
+          saw: "saw",
+          cuff: "handcuffs",
+          mag: "magnifyingglass",
+        };
+
+        const itemName = itemNameMap[itemType] || itemType;
+
+        console.log(`Mapped item type "${itemType}" to "${itemName}"`);
+
+        try {
+          console.log(`Sending item use request: itemName=${itemName}`);
+          onSerialEvent?.(`[SERIAL] Sending item use: ${itemName}`);
+          await apiUseItem(gId, itemName);
+          console.log("Item use successful, refreshing game state");
+          onSerialEvent?.(`[SERIAL] ✓ Item use successful: ${itemName}`);
+          // Re-fetch game state
+          if (isMounted) {
+            const data = await getGameState(gId);
+            setGameState(data);
+          }
+        } catch (err) {
+          console.error("Failed to use item:", err);
+          onSerialEvent?.(
+            `[SERIAL] ✗ Error: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      // Parse trigger detection (ignored for now - shotgun not implemented)
+      else if (line === "TRIGGER") {
+        console.log("Trigger detected (shotgun not yet implemented)");
+        onSerialEvent?.(`[SERIAL] Trigger detected (not yet implemented)`);
+      }
+
+      // Ignore other data
+      else if (line.length > 0) {
+        console.log("Received unknown serial data:", line);
+      }
+    };
+
     const initializeSerial = async () => {
       try {
         if ("serial" in navigator) {
           const port = await connectSerialDevice();
+          if (!isMounted) return;
+
           serialPortRef.current = port;
           setSerialConnected(true);
+          console.log("Serial device connected successfully");
+          // Refresh game state after serial connection
+          await fetchState();
 
           // Start reading serial data
           readSerialData(port, (data: string) => {
-            handleSerialData(data, gameId);
-          }).catch((err: any) => {
+            handleSerialDataLocal(data, gameId);
+          }).catch((err: Error) => {
             if (err.name !== "AbortError") {
               console.error("Serial read error:", err);
+              setSerialConnected(false);
             }
           });
+        } else {
+          console.warn("Web Serial API is not supported in this browser");
         }
       } catch (err) {
-        console.warn(
-          "Serial connection failed (this is normal if no device is connected):",
-          err,
-        );
+        if (isMounted) {
+          console.warn(
+            "Serial connection failed (this is normal if no device is connected):",
+            err,
+          );
+          setSerialConnected(false);
+        }
       }
     };
 
-    // Optionally auto-initialize on component mount
-    // Uncomment if you want auto-connection:
-    // initializeSerial();
+    // Auto-initialize on component mount
+    initializeSerial();
 
     return () => {
+      isMounted = false;
       if (serialPortRef.current) {
         closeSerialDevice(serialPortRef.current).catch(console.error);
+        serialPortRef.current = null;
+        setSerialConnected(false);
       }
     };
   }, [gameId, isDebug]);
-
-  const handleSerialData = async (data: string, gId: string) => {
-    const line = data.trim();
-
-    // Parse item detection (e.g., "ITEM:CIG")
-    if (line.startsWith("ITEM:")) {
-      const itemType = line.substring(5).toLowerCase();
-      console.log("Item detected:", itemType);
-
-      // Map serial format to internal format if needed
-      const itemNameMap: Record<string, string> = {
-        cig: "cigarette",
-        beer: "beer",
-        saw: "saw",
-        cuff: "handcuffs",
-        mag: "magnifyingglass",
-      };
-
-      const itemName = itemNameMap[itemType] || itemType;
-
-      try {
-        await useItem(gId, itemName);
-        await fetchState(); // Refresh game state
-      } catch (err) {
-        console.error("Failed to use item:", err);
-      }
-    }
-
-    // Parse trigger detection
-    else if (line === "TRIGGER") {
-      console.log("Trigger detected");
-      // This would typically be handled by the shotgun hardware
-      // triggering an action in the game
-    }
-  };
 
   // Connect serial device manually (for debug panel)
   const connectSerial = async () => {
@@ -131,18 +173,55 @@ export const useGameState = (gameId: string | null) => {
       const port = await connectSerialDevice();
       serialPortRef.current = port;
       setSerialConnected(true);
+      onSerialEvent?.(`[SERIAL] Device connected successfully`);
+      // Refresh game state after serial connection
+      await fetchState();
 
       readSerialData(port, (data: string) => {
         if (gameId) {
-          handleSerialData(data, gameId);
+          // Parse item detection locally
+          const line = data.trim();
+          if (line.startsWith("ITEM:")) {
+            const itemType = line.substring(5).toLowerCase();
+            onSerialEvent?.(
+              `[SERIAL] Item detected: ITEM:${itemType.toUpperCase()}`,
+            );
+
+            const itemNameMap: Record<string, string> = {
+              cig: "cigarette",
+              beer: "beer",
+              saw: "saw",
+              cuff: "handcuffs",
+              mag: "magnifyingglass",
+            };
+            const itemName = itemNameMap[itemType] || itemType;
+            onSerialEvent?.(`[SERIAL] Sending item use: ${itemName}`);
+            apiUseItem(gameId, itemName)
+              .then(async () => {
+                console.log("Item use successful");
+                onSerialEvent?.(`[SERIAL] ✓ Item use successful: ${itemName}`);
+                // Refresh UI after item use
+                await fetchState();
+              })
+              .catch((err) => {
+                console.error("Failed to use item:", err);
+                onSerialEvent?.(
+                  `[SERIAL] ✗ Error: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+          }
         }
-      }).catch((err: any) => {
+      }).catch((err: Error) => {
         if (err.name !== "AbortError") {
           console.error("Serial read error:", err);
+          onSerialEvent?.(`[SERIAL] ✗ Read error: ${err.message}`);
         }
       });
     } catch (err) {
       console.error("Failed to connect serial device:", err);
+      onSerialEvent?.(
+        `[SERIAL] ✗ Connection failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       setError("Failed to connect to serial device");
     }
   };
@@ -163,8 +242,11 @@ export const useGameState = (gameId: string | null) => {
   useEffect(() => {
     if (isDebug || gameId) {
       fetchState(); // Initial fetch
-      if (!isDebug) {
-        intervalRef.current = window.setInterval(fetchState, 1000); // Poll every 1s
+      // Only set up polling if NOT in debug mode
+      if (!isDebug && gameId) {
+        intervalRef.current = window.setInterval(() => {
+          fetchState();
+        }, 1000); // Poll every 1s
       }
     }
 
@@ -173,7 +255,7 @@ export const useGameState = (gameId: string | null) => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [gameId, isDebug]);
+  }, [gameId, isDebug, fetchState]);
 
   return {
     gameState,
@@ -190,7 +272,7 @@ export const useGameState = (gameId: string | null) => {
         `[useItem] Calling API with gameId=${gameId}, itemName=${itemName}, targetId=${targetId}`,
       );
       try {
-        const result = await useItem(gameId, itemName, targetId);
+        const result = await apiUseItem(gameId, itemName, targetId);
         console.log(`[useItem] Response:`, result);
         await fetchState();
         return result;

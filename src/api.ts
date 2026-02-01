@@ -9,6 +9,21 @@ export const api = axios.create({
   },
 });
 
+// Web Serial API型定義
+export interface SerialPort {
+  open(options: { baudRate: number }): Promise<void>;
+  close(): Promise<void>;
+  readable: ReadableStream<Uint8Array>;
+}
+
+declare global {
+  interface Navigator {
+    serial?: {
+      requestPort(): Promise<SerialPort>;
+    };
+  }
+}
+
 export interface GameState {
   id: string;
   round: number;
@@ -19,7 +34,7 @@ export interface GameState {
     blank_shells: number;
     is_sawed_off: boolean;
   };
-  dealer: any; // Add type if needed
+  dealer: Record<string, unknown>; // Changed from any
   items_on_table: string[];
   turn_log: string[];
   is_game_over: boolean;
@@ -108,13 +123,14 @@ export const connectSerialDevice = async (): Promise<SerialPort> => {
   if (!("serial" in navigator)) {
     throw new Error("Web Serial API is not supported in this browser");
   }
-  const port = await navigator.serial.requestPort();
+  const port = await navigator.serial!.requestPort();
   await port.open({ baudRate: 9600 });
   return port;
 };
 
 /**
  * シリアルポートからデータを読み取る
+ * 行ごとのデータを処理して、完全な行単位でコールバックを呼び出す
  */
 export const readSerialData = async (
   port: SerialPort,
@@ -122,14 +138,31 @@ export const readSerialData = async (
 ) => {
   const reader = port.readable.getReader();
   const decoder = new TextDecoder();
+  let buffer = ""; // Buffer for incomplete lines
 
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      const text = decoder.decode(value);
-      onData(text);
+      const text = decoder.decode(value, { stream: true });
+      buffer += text;
+
+      // Process complete lines (terminated by \n or \r\n)
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || ""; // Keep the incomplete part in buffer
+
+      for (const line of lines) {
+        if (line.trim()) {
+          // Only process non-empty lines
+          onData(line.trim());
+        }
+      }
+    }
+
+    // Process remaining data in buffer
+    if (buffer.trim()) {
+      onData(buffer.trim());
     }
   } finally {
     reader.releaseLock();
@@ -142,9 +175,3 @@ export const readSerialData = async (
 export const closeSerialDevice = async (port: SerialPort) => {
   await port.close();
 };
-
-export interface SerialPort {
-  open(options: { baudRate: number }): Promise<void>;
-  close(): Promise<void>;
-  readable: ReadableStream<Uint8Array>;
-}

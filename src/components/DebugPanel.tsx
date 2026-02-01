@@ -1,13 +1,18 @@
 import { useState } from "react";
+import { type GameState, type Player } from "../api";
 import "../styles/DebugPanel.css";
 
 interface DebugPanelProps {
-  gameState: any;
+  gameState: GameState | null;
   serialConnected: boolean;
   onConnectSerial: () => void;
   onDisconnectSerial: () => void;
-  onUseItem: (itemName: string, targetId?: number) => Promise<any>;
-  onShootShotgun: (targetId: number) => Promise<any>;
+  onUseItem: (
+    itemName: string,
+    targetId?: number,
+  ) => Promise<Record<string, unknown>>;
+  onShootShotgun: (targetId: number) => Promise<Record<string, unknown>>;
+  onSerialEvent?: (event: string) => void;
 }
 
 export const DebugPanel = ({
@@ -17,6 +22,7 @@ export const DebugPanel = ({
   onDisconnectSerial,
   onUseItem,
   onShootShotgun,
+  onSerialEvent,
 }: DebugPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<number>(0);
@@ -25,7 +31,12 @@ export const DebugPanel = ({
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    setLog((prev) => [...prev, `[${timestamp}] ${message}`].slice(-50)); // Keep last 50 logs
+    const logMessage = `[${timestamp}] ${message}`;
+    setLog((prev) => [...prev, logMessage].slice(-50)); // Keep last 50 logs
+    // Also notify serialEvent callback
+    if (onSerialEvent) {
+      onSerialEvent(logMessage);
+    }
   };
 
   const handleUseItem = async () => {
@@ -35,11 +46,14 @@ export const DebugPanel = ({
       );
       const result = await onUseItem(selectedItem, selectedTarget || undefined);
       addLog(
-        `✓ Item used successfully: ${JSON.stringify(result.message || "OK")}`,
+        `✓ Item used successfully: ${JSON.stringify(result.message ?? "OK")}`,
       );
-    } catch (err: any) {
+    } catch (err) {
+      const error = err as Error & {
+        response?: { data?: { message?: string } };
+      };
       const errorMsg =
-        err?.response?.data?.message || err?.message || String(err);
+        error?.response?.data?.message || error?.message || String(err);
       addLog(`✗ Error using item: ${errorMsg}`);
       console.error("[DebugPanel] useItem error:", err);
     }
@@ -54,21 +68,45 @@ export const DebugPanel = ({
       addLog(`Shooting target: ${selectedTarget}`);
       const result = await onShootShotgun(selectedTarget);
       addLog(
-        `✓ Shot fired successfully: ${JSON.stringify(result.message || "OK")}`,
+        `✓ Shot fired successfully: ${JSON.stringify(result.message ?? "OK")}`,
       );
-    } catch (err: any) {
+    } catch (err) {
+      const error = err as Error & {
+        response?: { data?: { message?: string } };
+      };
       const errorMsg =
-        err?.response?.data?.message || err?.message || String(err);
+        error?.response?.data?.message || error?.message || String(err);
       addLog(`✗ Error shooting: ${errorMsg}`);
       console.error("[DebugPanel] shootShotgun error:", err);
     }
   };
 
-  const handleSimulateItemDetection = () => {
-    addLog(
-      `[SIMULATED] Item detected: ITEM:${selectedItem.substring(0, 3).toUpperCase()}`,
-    );
-    // This would be called when serial data is detected
+  const handleSimulateItemDetection = async () => {
+    const itemTypeMap: Record<string, string> = {
+      cigarette: "CIG",
+      beer: "BEER",
+      saw: "SAW",
+      handcuffs: "CUFF",
+      magnifyingglass: "MAG",
+    };
+
+    const itemType = itemTypeMap[selectedItem] || selectedItem;
+    addLog(`[SIMULATED] Item detected: ITEM:${itemType}`);
+
+    try {
+      addLog(`Simulating item use: ${selectedItem}`);
+      const result = await onUseItem(selectedItem, selectedTarget || undefined);
+      addLog(
+        `✓ Item used successfully (simulated): ${JSON.stringify(result.message ?? "OK")}`,
+      );
+    } catch (err) {
+      const error = err as Error & {
+        response?: { data?: { message?: string } };
+      };
+      const errorMsg =
+        error?.response?.data?.message || error?.message || String(err);
+      addLog(`✗ Error using item (simulated): ${errorMsg}`);
+    }
   };
 
   const itemOptions = [
@@ -78,8 +116,6 @@ export const DebugPanel = ({
     { value: "handcuffs", label: "Handcuffs (CUFF)" },
     { value: "magnifyingglass", label: "Magnifying Glass (MAG)" },
   ];
-
-  const players = gameState?.players || [];
 
   return (
     <>
@@ -152,7 +188,7 @@ export const DebugPanel = ({
                   onChange={(e) => setSelectedTarget(Number(e.target.value))}
                 >
                   <option value={0}>No Target (Self)</option>
-                  {players.map((p: any) => (
+                  {gameState?.players.map((p: Player) => (
                     <option key={p.id} value={p.id}>
                       Player {p.id}: {p.name}
                     </option>
@@ -183,7 +219,7 @@ export const DebugPanel = ({
                   onChange={(e) => setSelectedTarget(Number(e.target.value))}
                 >
                   <option value={0}>Select Target...</option>
-                  {players.map((p: any) => (
+                  {gameState?.players.map((p: Player) => (
                     <option key={p.id} value={p.id}>
                       Player {p.id}: {p.name}
                     </option>
