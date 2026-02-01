@@ -6,6 +6,7 @@ import { executeAction, startInteraction, cancelInteraction } from './api';
 
 function App() {
   const [gameId, setGameId] = useState<string | null>(null);
+  const [onSerialEvent, setOnSerialEvent] = useState<(event: string) => void>(() => {});
 
   // Target Selection State is now handled by gameState.pending_interaction
 
@@ -14,6 +15,7 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const gid = params.get('game_id');
+    
     if (gid) {
       setGameId(gid);
     }
@@ -30,7 +32,7 @@ function App() {
     disconnectSerial,
     useItem,
     shootShotgun,
-  } = useGameState(gameId);
+  } = useGameState(gameId, onSerialEvent);
 
   const [actionPopup, setActionPopup] = useState<{
     type: 'shoot' | 'item';
@@ -180,8 +182,8 @@ function App() {
         </div>
       )}
 
-      {/* Debug Panel - Always available when isDebug is true */}
-      {isDebug && gameState && (
+      {/* Debug Panel - Show if in debug mode OR if serial not connected */}
+      {(isDebug || !serialConnected) && gameState && (
         <DebugPanel
           gameState={gameState}
           serialConnected={serialConnected}
@@ -189,6 +191,7 @@ function App() {
           onDisconnectSerial={disconnectSerial}
           onUseItem={useItem}
           onShootShotgun={shootShotgun}
+          onSerialEvent={setOnSerialEvent}
         />
       )}
     </div>
